@@ -1,0 +1,192 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  fullName  String
+  role      UserRole @default(EMPLOYEE)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Company relationship
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  // Manager relationship (self-referencing)
+  managerId String?
+  manager   User?   @relation("ManagerEmployee", fields: [managerId], references: [id])
+  employees User[]  @relation("ManagerEmployee")
+
+  // Expenses submitted by this user
+  expenses Expense[]
+
+  // Approvals made by this user
+  approvals Approval[]
+
+  // Approval rules created by this user
+  approvalRules ApprovalRule[]
+
+  // Performance indexes
+  @@index([email])
+  @@index([companyId])
+  @@index([role])
+  @@index([companyId, role])
+  @@index([managerId])
+  @@index([isActive])
+  @@map("users")
+}
+
+model Company {
+  id            String   @id @default(cuid())
+  name          String
+  country       String
+  baseCurrency  String
+  address       String?
+  contactEmail  String?
+  contactPhone  String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Users in this company
+  users User[]
+
+  // Expenses in this company
+  expenses Expense[]
+
+  // Approval rules for this company
+  approvalRules ApprovalRule[]
+
+  @@map("companies")
+}
+
+model Expense {
+  id              String        @id @default(cuid())
+  amount          Decimal       @db.Decimal(10, 2)
+  currency        String
+  convertedAmount Decimal?      @db.Decimal(10, 2) // Amount in company base currency
+  baseCurrency    String?       // Company base currency
+  exchangeRate    Decimal?      @db.Decimal(10, 6) // Exchange rate used for conversion
+  category        String
+  description     String
+  vendor          String?       // Extracted from OCR
+  expenseDate     DateTime
+  receiptUrl      String?
+  ocrExtracted    Boolean       @default(false) // Whether data was extracted via OCR
+  ocrConfidence   Decimal?      @db.Decimal(5, 4) // OCR confidence score (0-1)
+  status          ExpenseStatus @default(PENDING)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // User who submitted this expense
+  submittedById String
+  submittedBy   User   @relation(fields: [submittedById], references: [id])
+
+  // Company this expense belongs to
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  // Approvals for this expense
+  approvals Approval[]
+
+  // Performance indexes
+  @@index([submittedById])
+  @@index([companyId])
+  @@index([status])
+  @@index([companyId, status])
+  @@index([submittedById, status])
+  @@index([category])
+  @@index([expenseDate])
+  @@index([createdAt])
+  @@index([ocrExtracted])
+  @@index([vendor])
+  @@map("expenses")
+}
+
+model Approval {
+  id         String         @id @default(cuid())
+  status     ApprovalStatus @default(PENDING)
+  comments   String?
+  approvedAt DateTime?
+  order      Int            @default(1)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  // Expense being approved
+  expenseId String
+  expense   Expense @relation(fields: [expenseId], references: [id])
+
+  // User who is/did approve
+  approverId String
+  approver   User   @relation(fields: [approverId], references: [id])
+
+  // Performance indexes
+  @@index([expenseId])
+  @@index([approverId])
+  @@index([status])
+  @@index([approverId, status])
+  @@index([expenseId, status])
+  @@index([order])
+  @@map("approvals")
+}
+
+model ApprovalRule {
+  id          String            @id @default(cuid())
+  name        String
+  category    String?           // null means all categories
+  minAmount   Decimal           @db.Decimal(10, 2)
+  maxAmount   Decimal?          @db.Decimal(10, 2) // null means no upper limit
+  approverType ApproverType
+  approverId  String?           // for SPECIFIC_USER type
+  approverIds String[]          // for SEQUENTIAL type (array of user IDs)
+  isActive    Boolean           @default(true)
+  priority    Int               @default(1) // Higher number = higher priority
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  // Company this rule belongs to
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  // User who created this rule
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  @@map("approval_rules")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ApproverType {
+  MANAGER
+  SPECIFIC_USER
+  SEQUENTIAL
+}
